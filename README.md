@@ -1,49 +1,63 @@
 # BasePlaneFittingTerrain
 
-基于激光雷达点云的基准面拟合、障碍检测与安全着陆评估实验项目。
+[![CI](https://github.com/chenganggang2020/BasePlaneFittingTerrain/actions/workflows/ci.yml/badge.svg)](https://github.com/chenganggang2020/BasePlaneFittingTerrain/actions/workflows/ci.yml)
 
-这个仓库现在已经整理成适合直接同步到 GitHub 的研究型项目结构，包含：
-- 结构化模拟数据生成
-- 多种平面拟合算法对比
-- 风险图 / 安全图 / 联合决策评估
-- 消融实验
-- 论文风格图表复现
-- 一键式完整流程入口
+Research codebase for robust base-plane fitting, terrain hazard assessment, and safe landing zone evaluation from simulated LiDAR point clouds.
 
-## 目录说明
+This repository has been reorganized to support:
+
+- structured terrain and outlier simulation
+- multiple plane-fitting baselines and robust variants
+- risk-map, safety-map, and joint decision analysis
+- ablation studies
+- paper-style figure reproduction
+- one-command end-to-end execution on Windows and Linux/Kylin
+
+## Highlights
+
+- Cross-platform pipeline entrypoint: `run_complete_pipeline.py`
+- Parallel data generation and experiment execution
+- Structured contamination scenarios for better evaluation of `RSTLS`
+- Standard-library-first result aggregation path for easier deployment
+- GitHub-ready repository layout with CI and ignore rules
+
+## Repository Layout
 
 - `run_complete_pipeline.py`
-  一键总控脚本，按顺序完成数据生成、主实验、消融实验和论文图表复现。
+  One-command pipeline runner for simulation, main experiments, ablation, and paper-style reporting.
 - `run_paper_experiments.py`
-  跑主实验与全局对比图。
+  Runs the main experiment suite for a selected preset.
 - `run_ablation_study.py`
-  跑消融实验。
+  Runs the ablation study suite.
 - `reproduce_paper_figures.py`
-  基于已有结果目录重绘论文风格图表和表格。
+  Regenerates paper-style figures and summary tables from existing results.
 - `OutlierTerrainSimulator.py`
-  结构化模拟器，支持条带噪声、连续坏批次和距离相关异方差噪声。
+  Structured simulator with stripe noise, bad scan batches, and distance-dependent heteroscedastic noise.
 - `monte_carlo.py`
-  主分析器与批处理流程，已支持点云级并行。
+  Main batch analyzer and result aggregation pipeline.
+- `algorithm_runner.py`
+  Algorithm registry for baseline and robust fitting methods.
 
-## 环境要求
+## Installation
 
-核心依赖：
+Core dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-可选依赖：
+Optional dependencies:
+
 - `GDAL / osgeo`
-  用于导出 GeoTIFF；如果没有安装，模拟器会自动回退为 `.npy` DEM 输出。
+  Enables GeoTIFF export. If unavailable, DEM export falls back to `.npy`.
 - `pandas`
-  当前主流程不依赖 `pandas`，但个别历史可视化分支仍保留可选兼容。
+  No longer required for the main pipeline, but still supported by a few legacy visualization paths.
 - `seaborn`
-  仅部分可视化函数会尝试按需导入。
+  Used only by selected plotting utilities when available.
 
-## 快速开始
+## Quick Start
 
-### 1. 一键跑完整流程
+### Run the complete pipeline
 
 Windows:
 
@@ -51,71 +65,85 @@ Windows:
 python run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 300
 ```
 
-Linux / 麒麟:
+Linux / Kylin:
 
 ```bash
 python3 run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 300
 ```
 
-### 2. 先跑一个快速验证版
+### Run a fast smoke-test version
 
 ```powershell
 python run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 150 --skip-ablation --skip-paper-report --include-methods RANSAC,RobustLS-TLS,RSTLS --disable-risk --disable-safety --disable-joint
 ```
 
-## 常用脚本
+## Common Commands
 
-只生成结构化模拟数据：
+Generate structured simulation data only:
 
 ```powershell
 python OutlierTerrainSimulator.py --workers auto
 ```
 
-只跑主实验：
+Run the main experiment only:
 
 ```powershell
 python run_paper_experiments.py --preset structured35 --workers auto --force-reprocess --no-save-vector --dpi 300
 ```
 
-只跑消融：
+Run ablation only:
 
 ```powershell
 python run_ablation_study.py --preset structured35 --ablation all --workers auto
 ```
 
-只重绘论文图表：
+Reproduce paper-style figures from existing outputs:
 
 ```powershell
 python reproduce_paper_figures.py --preset structured35
 ```
 
-## GitHub 同步建议
+## Output Layout
 
-本仓库默认不会把以下内容提交到 GitHub：
-- 生成点云
-- 生成 DEM
-- `results/` 实验结果
-- `_tmp*` 临时调试目录
+Typical generated content includes:
 
-这样仓库会保持轻量，便于同步和协作。如果你确实需要分享大结果文件，建议使用：
+- simulated DEM and point-cloud folders
+- experiment result directories under `results/`
+- global comparison plots
+- paper-style reproduced figures and summary markdown reports
+
+Generated data and result folders are intentionally ignored by Git so the repository stays lightweight.
+
+## Recommended Workflow
+
+1. Run a small smoke test first.
+2. Run the full preset once the pipeline is stable.
+3. Reproduce the paper-style figures from the generated result directory.
+4. Run ablations only after the main experiment output looks correct.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for a simple branch and commit workflow.
+
+## GitHub Sync Notes
+
+The repository ignores the following by default:
+
+- generated point clouds
+- generated DEMs
+- `results/`
+- `_tmp*` debugging folders
+
+For large result sharing, prefer:
+
 - GitHub Releases
 - Git LFS
-- 网盘 / 对象存储
+- external object storage or cloud drive links
 
-## 初始化并推送到 GitHub
+## Current Status
 
-如果本地还没有远端仓库，可以按下面流程：
+- CI checks basic syntax and entrypoint health
+- the main pipeline supports Windows and Linux/Kylin command-line usage
+- parallel execution is available for both data generation and experiment runs
 
-```bash
-git init -b main
-git add .
-git commit -m "Initial research pipeline setup"
-git remote add origin <your-github-repo-url>
-git push -u origin main
-```
+## Citation / Usage
 
-## 说明
-
-- 已为跨平台运行整理了无界面 `Agg` 绘图后端。
-- 受限环境下如果进程池不可用，会自动回退到线程池。
-- GitHub Actions 已提供最小 CI，用于做语法和入口健康检查。
+If you use this repository in a paper or report, please cite the corresponding method description and clearly state the simulation preset and algorithm subset used in your experiments.
