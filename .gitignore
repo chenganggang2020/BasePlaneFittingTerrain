@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Generated datasets
+dem_files_centered/
+dem_files_output*/
+dem_files_output_structured35/
+point_clouds_centered/
+point_clouds_output*/
+point_clouds_output_structured35/
+Simulated_Data_Centered/
+
+# Generated experiment outputs
+outlier_sweep_results/
+results/
+
+# Temporary / local debugging
+_tmp*/
+_tmp*
+*.log
+
+# Large generated artifacts
+*.npy
+*.npz
+*.tif
+*.tiff
+*.xyz
+*.off
