@@ -1,18 +1,23 @@
 # Paper Folder
 
-Use this folder to separate manuscript-related files from code and results.
+Use this folder to keep manuscript material separate from runnable code, data, and experiment outputs.
 
 Suggested layout:
 
-- `paper/original/`
-  Place PDF, DOCX, submission drafts, reviewer replies, and other manuscript files here.
-  Recommended subfolders:
-  - `paper/original/reference/` for source papers or reference PDFs
-  - `paper/original/drafts/` for your own manuscript DOCX drafts
-- `paper/notes/`
-  Place extracted text, reading notes, method-gap analysis, and section outlines here.
+- `paper/original/reference/`
+  Store source papers, reference PDFs, review material, and related literature.
+- `paper/original/drafts/`
+  Store your own manuscript drafts, submission packages, and response documents.
+- `paper/notes/extracted_text/`
+  Store local text extracted from PDFs or OCR output.
+- `paper/notes/method_gap/`
+  Store paper-to-code comparison notes and implementation gap analysis.
+- `paper/notes/reading_notes/`
+  Store section-by-section reading notes and interpretation records.
+- `paper/notes/draft_outline/`
+  Store writing outlines, figure plans, and section planning notes.
 
-Current notes already moved here include:
+Current local notes include:
 
-- `paper/notes/_tmp_paper.txt`
-- `paper/notes/Paper_Method_Gap_Analysis_CN.md`
+- `paper/notes/extracted_text/_tmp_paper.txt` (local extracted text, currently ignored by Git)
+- `paper/notes/method_gap/Paper_Method_Gap_Analysis_CN.md`

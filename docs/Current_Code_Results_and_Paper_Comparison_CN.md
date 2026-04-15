@@ -10,7 +10,7 @@
 
 当前对照主要基于：
 
-- [论文抽取文本](D:/BasePlaneFittingTerrain/paper/notes/_tmp_paper.txt)
+- [论文抽取文本](D:/BasePlaneFittingTerrain/paper/notes/extracted_text/_tmp_paper.txt)
 - [主实验汇总表](D:/BasePlaneFittingTerrain/results/paper/legacy_root_summary/global_comparison_plots/global_aggregated_results.csv)
 - [主流程入口](D:/BasePlaneFittingTerrain/code/run_complete_pipeline.py)
 - [实验预设](D:/BasePlaneFittingTerrain/code/experiment_presets.py)
@@ -227,7 +227,7 @@
 
 ### 6.1 论文方法主线
 
-根据 [论文抽取文本](D:/BasePlaneFittingTerrain/paper/notes/_tmp_paper.txt)，论文方法主线可以概括为：
+根据 [论文抽取文本](D:/BasePlaneFittingTerrain/paper/notes/extracted_text/_tmp_paper.txt)，论文方法主线可以概括为：
 
 - 第 2 章：多特征贝叶斯风险概率图
 - 第 3.2 节：稳健混合 LS-TLS

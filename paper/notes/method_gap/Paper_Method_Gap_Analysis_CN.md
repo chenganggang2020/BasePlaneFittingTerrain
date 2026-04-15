@@ -3,7 +3,7 @@
 对应文档：
 
 - `D:\OneDrive\Zotero\storage\避障着陆\基准面拟合\基于激光雷达的深空软着陆稳健障碍检测方法研究.pdf`
-- 提取文本：`D:\OneDrive\python\BasePlaneFittingTerrain\_tmp_paper.txt`
+- 提取文本：`D:\BasePlaneFittingTerrain\paper\notes\extracted_text\_tmp_paper.txt`
 
 ## 0. 实现进展（2026-04-04）
 
