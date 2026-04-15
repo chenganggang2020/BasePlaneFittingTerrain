@@ -31,6 +31,8 @@ def parse_args():
 
 
 def main():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(repo_root)
     args = parse_args()
     preset = get_paper_preset(args.preset)
     ablation_names = list(ABLATION_CASES.keys()) if args.ablation == "all" else [args.ablation]

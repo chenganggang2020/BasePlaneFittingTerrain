@@ -47,6 +47,8 @@ def parse_args():
 
 
 def main():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(repo_root)
     args = parse_args()
     preset_names = list(PAPER_EXPERIMENT_PRESETS.keys()) if args.preset == "all" else [args.preset]
 
@@ -89,7 +91,7 @@ def main():
         }
         manifest.append(record)
 
-    manifest_path = os.path.abspath(os.path.join("results", "paper_experiment_manifest.json"))
+    manifest_path = os.path.abspath(os.path.join("results", "paper", "manifests", "paper_experiment_manifest.json"))
     dump_manifest(manifest_path, manifest)
     print(f"\nPaper experiment manifest saved to: {manifest_path}")
 

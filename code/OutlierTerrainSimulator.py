@@ -504,8 +504,8 @@ def generate_structured_dataset(
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate structured synthetic terrain and point clouds.")
-    parser.add_argument("--dem-dir", default="dem_files_output_structured35")
-    parser.add_argument("--pc-dir", default="point_clouds_output_structured35")
+    parser.add_argument("--dem-dir", default="data/dem_files_output_structured35")
+    parser.add_argument("--pc-dir", default="data/point_clouds_output_structured35")
     parser.add_argument("--slope-angle", type=float, default=35.0)
     parser.add_argument("--base-z", type=float, default=30.0)
     parser.add_argument("--ratio-start", type=float, default=0.10)
@@ -520,6 +520,8 @@ def parse_args():
 
 
 def main():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(repo_root)
     args = parse_args()
     simulator_kwargs = build_default_structured_simulator_kwargs(
         slope_angle=args.slope_angle,

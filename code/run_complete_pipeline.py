@@ -72,6 +72,8 @@ def parse_method_list(value):
 
 
 def main():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(repo_root)
     args = parse_args()
     preset = get_paper_preset(args.preset)
 

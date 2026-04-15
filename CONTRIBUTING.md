@@ -40,6 +40,7 @@ Please try to complete the relevant checks:
 
 - On Windows, use `python`.
 - On Linux or Kylin, use `python3`.
+- Run entry scripts from the repository root, for example `python code/run_complete_pipeline.py --help`.
 - The pipeline is designed to fall back gracefully when some optional packages are unavailable.
 
 ## Large Outputs

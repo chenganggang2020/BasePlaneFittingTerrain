@@ -4,39 +4,42 @@
 
 Research codebase for robust base-plane fitting, terrain hazard assessment, and safe landing zone evaluation from simulated LiDAR point clouds.
 
-This repository has been reorganized to support:
-
-- structured terrain and outlier simulation
-- multiple plane-fitting baselines and robust variants
-- risk-map, safety-map, and joint decision analysis
-- ablation studies
-- paper-style figure reproduction
-- one-command end-to-end execution on Windows and Linux/Kylin
-
-## Highlights
-
-- Cross-platform pipeline entrypoint: `run_complete_pipeline.py`
-- Parallel data generation and experiment execution
-- Structured contamination scenarios for better evaluation of `RSTLS`
-- Standard-library-first result aggregation path for easier deployment
-- GitHub-ready repository layout with CI and ignore rules
-
 ## Repository Layout
 
-- `run_complete_pipeline.py`
+The project is now organized by purpose rather than by script age:
+
+- `code/`
+  Main Python source code and runnable entry scripts.
+- `data/`
+  Generated DEM and point-cloud datasets.
+- `results/`
+  Experiment outputs, split into `paper/`, `debug/`, and `archive/`.
+- `paper/`
+  Paper materials, manuscript drafts, extracted text, and method notes.
+- `docs/`
+  Project-facing technical notes and repository status documents.
+- `legacy/`
+  Older experimental entry scripts kept only for reference/compatibility.
+
+## Project Status Docs
+
+- Chinese project status and paper-comparison note:
+  `docs/Current_Code_Results_and_Paper_Comparison_CN.md`
+
+## Main Entry Points
+
+Run these from the repository root:
+
+- `code/run_complete_pipeline.py`
   One-command pipeline runner for simulation, main experiments, ablation, and paper-style reporting.
-- `run_paper_experiments.py`
+- `code/run_paper_experiments.py`
   Runs the main experiment suite for a selected preset.
-- `run_ablation_study.py`
+- `code/run_ablation_study.py`
   Runs the ablation study suite.
-- `reproduce_paper_figures.py`
+- `code/reproduce_paper_figures.py`
   Regenerates paper-style figures and summary tables from existing results.
-- `OutlierTerrainSimulator.py`
+- `code/OutlierTerrainSimulator.py`
   Structured simulator with stripe noise, bad scan batches, and distance-dependent heteroscedastic noise.
-- `monte_carlo.py`
-  Main batch analyzer and result aggregation pipeline.
-- `algorithm_runner.py`
-  Algorithm registry for baseline and robust fitting methods.
 
 ## Installation
 
@@ -62,19 +65,19 @@ Optional dependencies:
 Windows:
 
 ```powershell
-python run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 300
+python code/run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 300
 ```
 
 Linux / Kylin:
 
 ```bash
-python3 run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 300
+python3 code/run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 300
 ```
 
 ### Run a fast smoke-test version
 
 ```powershell
-python run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 150 --skip-ablation --skip-paper-report --include-methods RANSAC,RobustLS-TLS,RSTLS --disable-risk --disable-safety --disable-joint
+python code/run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 150 --skip-ablation --skip-paper-report --include-methods RANSAC,RobustLS-TLS,RSTLS --disable-risk --disable-safety --disable-joint
 ```
 
 ## Common Commands
@@ -82,55 +85,49 @@ python run_complete_pipeline.py --preset structured35 --workers auto --generatio
 Generate structured simulation data only:
 
 ```powershell
-python OutlierTerrainSimulator.py --workers auto
+python code/OutlierTerrainSimulator.py --workers auto
 ```
 
 Run the main experiment only:
 
 ```powershell
-python run_paper_experiments.py --preset structured35 --workers auto --force-reprocess --no-save-vector --dpi 300
+python code/run_paper_experiments.py --preset structured35 --workers auto --force-reprocess --no-save-vector --dpi 300
 ```
 
 Run ablation only:
 
 ```powershell
-python run_ablation_study.py --preset structured35 --ablation all --workers auto
+python code/run_ablation_study.py --preset structured35 --ablation all --workers auto
 ```
 
 Reproduce paper-style figures from existing outputs:
 
 ```powershell
-python reproduce_paper_figures.py --preset structured35
+python code/reproduce_paper_figures.py --preset structured35
 ```
 
-## Output Layout
+## Data and Paper Organization
 
-Typical generated content includes:
+- Put generated or copied point-cloud/DEM folders under `data/`.
+- Put manuscript drafts, PDF, DOCX, and external paper files under `paper/original/`.
+- Put extracted text, reading notes, and method-gap notes under `paper/notes/`.
+- Put formal experiment outputs under `results/paper/`.
+- Put temporary or ad-hoc outputs under `results/debug/`.
+- Move old result trees that should be kept but not reused into `results/archive/`.
 
-- simulated DEM and point-cloud folders
-- experiment result directories under `results/`
-- global comparison plots
-- paper-style reproduced figures and summary markdown reports
+See:
 
-Generated data and result folders are intentionally ignored by Git so the repository stays lightweight.
-
-## Recommended Workflow
-
-1. Run a small smoke test first.
-2. Run the full preset once the pipeline is stable.
-3. Reproduce the paper-style figures from the generated result directory.
-4. Run ablations only after the main experiment output looks correct.
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for a simple branch and commit workflow.
+- `data/README.md`
+- `paper/README.md`
 
 ## GitHub Sync Notes
 
-The repository ignores the following by default:
+The repository ignores generated datasets and experiment outputs by default:
 
-- generated point clouds
-- generated DEMs
+- generated DEM folders
+- generated point-cloud folders
 - `results/`
-- `_tmp*` debugging folders
+- `_tmp*` debugging files
 
 For large result sharing, prefer:
 
@@ -140,9 +137,10 @@ For large result sharing, prefer:
 
 ## Current Status
 
-- CI checks basic syntax and entrypoint health
+- CI checks syntax and entrypoint health
 - the main pipeline supports Windows and Linux/Kylin command-line usage
 - parallel execution is available for both data generation and experiment runs
+- code, data, results, paper, and legacy scripts are now separated at the folder level
 
 ## Citation / Usage
 

@@ -27,6 +27,9 @@ point_clouds_centered/
 point_clouds_output*/
 point_clouds_output_structured35/
 Simulated_Data_Centered/
+data/dem_files*/
+data/point_clouds*/
+data/Simulated_Data_Centered/
 
 # Generated experiment outputs
 outlier_sweep_results/

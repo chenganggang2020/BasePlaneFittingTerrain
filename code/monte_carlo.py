@@ -985,7 +985,7 @@ class PointCloudAnalyzer:
             traceback.print_exc()
             return []
 
-    def run_outlier_sweep(self, point_cloud_dir="point_clouds", output_root="outlier_sweep_results",
+    def run_outlier_sweep(self, point_cloud_dir="data/point_clouds_output", output_root="results/debug/outlier_sweep_results",
                           random_seed=42, force_reprocess=False, dpi=2000, save_vector=False,
                           eps_mapping=None, max_workers=1):
         """Pure-stdlib outlier ratio sweep."""

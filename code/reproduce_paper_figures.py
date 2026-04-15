@@ -59,18 +59,18 @@ METHOD_RANKING_OBJECTIVES = {
 
 PRESET_RESULT_FALLBACKS = {
     "peiv10": [
-        "results/outlier_sweep_results_peiv",
-        "results/outlier_sweep_results",
+        "results/paper/peiv10",
+        "results/paper/legacy_random_sweep",
     ],
     "peiv15": [
-        "results/outlier_sweep_results_peiv15",
+        "results/paper/peiv15",
     ],
     "peiv35": [
-        "results/outlier_sweep_results_peiv35",
+        "results/paper/peiv35",
     ],
     "structured35": [
-        "results/paper_structured35",
-        "results/outlier_sweep_results_structured35",
+        "results/paper/structured35",
+        "results/debug/outlier_sweep_results_structured35",
     ],
 }
 
@@ -123,7 +123,8 @@ def resolve_results_root(preset_name=None, results_root=None):
     preset = get_paper_preset(preset_name)
     candidates = [preset.output_root]
     candidates.extend(PRESET_RESULT_FALLBACKS.get(preset_name, []))
-    candidates.append(os.path.join("results", f"outlier_sweep_results_{preset_name}"))
+    candidates.append(os.path.join("results", "paper", preset_name))
+    candidates.append(os.path.join("results", "debug", f"outlier_sweep_results_{preset_name}"))
 
     for candidate in candidates:
         abs_candidate = os.path.abspath(candidate)
@@ -440,6 +441,8 @@ def parse_args():
 
 
 def main():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(repo_root)
     args = parse_args()
     report = reproduce_paper_artifacts(
         preset_name=args.preset,

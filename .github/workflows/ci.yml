@@ -35,7 +35,7 @@ jobs:
           from pathlib import Path
           import py_compile
 
-          for path in sorted(Path('.').glob('*.py')):
+          for path in sorted(Path('code').glob('*.py')):
               py_compile.compile(str(path), doraise=True)
               print(f'compiled {path}')
           PY
@@ -43,9 +43,9 @@ jobs:
 
       - name: CLI smoke check
         run: |
-          python run_complete_pipeline.py --help
-          python run_paper_experiments.py --help
-          python run_ablation_study.py --help
-          python OutlierTerrainSimulator.py --help
-          python reproduce_paper_figures.py --help
+          python code/run_complete_pipeline.py --help
+          python code/run_paper_experiments.py --help
+          python code/run_ablation_study.py --help
+          python code/OutlierTerrainSimulator.py --help
+          python code/reproduce_paper_figures.py --help
         shell: bash
