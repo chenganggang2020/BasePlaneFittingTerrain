@@ -6,6 +6,9 @@ Suggested layout:
 
 - `paper/original/`
   Place PDF, DOCX, submission drafts, reviewer replies, and other manuscript files here.
+  Recommended subfolders:
+  - `paper/original/reference/` for source papers or reference PDFs
+  - `paper/original/drafts/` for your own manuscript DOCX drafts
 - `paper/notes/`
   Place extracted text, reading notes, method-gap analysis, and section outlines here.
 

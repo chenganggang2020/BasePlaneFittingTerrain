@@ -47,3 +47,9 @@ _tmp*
 *.tiff
 *.xyz
 *.off
+
+# Original manuscript/reference files kept locally
+paper/original/**/*.pdf
+paper/original/**/*.doc
+paper/original/**/*.docx
+!paper/original/README.md
