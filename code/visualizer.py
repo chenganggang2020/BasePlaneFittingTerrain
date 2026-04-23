@@ -34,15 +34,21 @@ def downsample_points(points, ratio=0.1, random_state=42):
     # For very large point clouds, keep at most 100,000 points (balance visualization and performance)
     max_keep = 100000
     ratio = min(ratio, max_keep / n_points)
-    np.random.seed(random_state)
-    indices = np.random.choice(n_points, int(n_points * ratio), replace=False)
+    rng = np.random.default_rng(random_state)
+    indices = rng.choice(n_points, int(n_points * ratio), replace=False)
     return points[indices], indices
 
 
 # ---------------------- 2. 3D Terrain/Outlier Specialized Preprocessing (shared cache) ----------------------
 def preprocess_3d_data(points,labels=None):
     """Preprocess data for 3D terrain/outlier analysis, cache downsampling indices and original coordinates"""
-    if '3d_points' in _cache and np.array_equal(_cache['3d_points'], points):
+    cached_points = _cache.get('3d_points')
+    cached_labels = _cache.get('labels_source')
+    labels_match = (
+        (labels is None and cached_labels is None) or
+        (labels is not None and cached_labels is not None and np.array_equal(cached_labels, labels))
+    )
+    if cached_points is not None and labels_match and np.array_equal(cached_points, points):
         return _cache  # Already cached, return directly
 
     # Convert to float32 to reduce memory usage
@@ -70,9 +76,42 @@ def preprocess_3d_data(points,labels=None):
         'x_ds': x_ds, 'y_ds': y_ds, 'z_ds': z_ds,
         'x_unique': x_unique,
         'z_mean': z_mean,
-        'labels_ds': labels
+        'labels_ds': labels[down_indices] if labels is not None and len(labels) == len(points) else labels,
+        'labels_source': None if labels is None else np.asarray(labels).copy(),
     })
     return _cache
+
+
+def coerce_inlier_mask(inliers, point_count, method_name=None):
+    if point_count <= 0:
+        return np.array([], dtype=bool)
+    if inliers is None:
+        return np.ones(point_count, dtype=bool)
+
+    arr = np.asarray(inliers)
+    if arr.size == 0:
+        return np.zeros(point_count, dtype=bool)
+
+    label = f" for {method_name}" if method_name else ""
+    if np.issubdtype(arr.dtype, np.bool_):
+        if arr.size != point_count:
+            print(f"Warning: inliers mask length mismatch{label}; using all points for visualization.")
+            return np.ones(point_count, dtype=bool)
+        return arr.astype(bool, copy=False)
+
+    if np.issubdtype(arr.dtype, np.integer):
+        flat = arr.reshape(-1)
+        if flat.size == point_count and np.all(np.isin(flat, [0, 1])):
+            return flat.astype(bool)
+        mask = np.zeros(point_count, dtype=bool)
+        valid = flat[(flat >= 0) & (flat < point_count)]
+        if valid.size != flat.size:
+            print(f"Warning: invalid inlier indices detected{label}; clipping to valid range.")
+        mask[valid] = True
+        return mask
+
+    print(f"Warning: unsupported inliers format{label}; using all points for visualization.")
+    return np.ones(point_count, dtype=bool)
 
 
 # ---------------------- 3. 3D Terrain Plotting (fixed cache calls, optimized rendering) ----------------------
@@ -179,6 +218,8 @@ def plot_common_3d_terrain(points, fitting_results=None, labels=None,
     x_grid = np.linspace(cache['x'].min(), cache['x'].max(), 50)
     y_grid = np.linspace(cache['y'].min(), cache['y'].max(), 50)
     X, Y = np.meshgrid(x_grid, y_grid)
+    display_points = cache['downsampled']
+    display_indices = cache['down_indices']
 
     for i, fr in enumerate(fitting_results):
         row = i // max_cols
@@ -200,16 +241,17 @@ def plot_common_3d_terrain(points, fitting_results=None, labels=None,
         method_name = fr["method"]
         n = fr["n_est"]
         d = fr["d_est"]
-        inliers = fr.get("inliers", np.ones(len(points), dtype=bool))
+        inliers = coerce_inlier_mask(fr.get("inliers"), len(points), method_name=method_name)
+        display_inliers = inliers[display_indices]
 
         # 绘制点云（算法识别的内外点）
         ax.scatter(
-            points[inliers, 0], points[inliers, 1], points[inliers, 2],
+            display_points[display_inliers, 0], display_points[display_inliers, 1], display_points[display_inliers, 2],
             c='blue', s=0.6, alpha=0.8,
             label='Inliers', zorder=2
         )
         ax.scatter(
-            points[~inliers, 0], points[~inliers, 1], points[~inliers, 2],
+            display_points[~display_inliers, 0], display_points[~display_inliers, 1], display_points[~display_inliers, 2],
             c='red', s=0.6, alpha=0.8,
             label='Outliers', zorder=2
         )
@@ -272,12 +314,9 @@ def plot_common_outlier_dist(points, inliers, x_label, y_label,
     cache = preprocess_3d_data(points)
 
     # Critical fix: filter inliers by downsampling indices (ensure matching downsampled point count)
-    if inliers is None or len(inliers) != len(cache['3d_points']):
-        print("Warning: inliers mask length mismatch, skipping outlier plot")
-        return None
+    inliers = coerce_inlier_mask(inliers, len(cache['3d_points']))
     inliers_ds = inliers[cache['down_indices']]  # Inliers mask for downsampled points
 
-    plt.close('all')
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111)
 
@@ -357,7 +396,6 @@ def plot_roughness_heatmap(
     )
 
     # 绘图
-    plt.close('all')
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111)
     heatmap = ax.imshow(
@@ -458,7 +496,6 @@ def plot_elevation_profile(
     z_plane_per_bin = -(n_est[0] * cache['x_bin_centers'] + n_est[1] * y_mean + d_est) / n_est[2]
 
     # 绘图
-    plt.close('all')
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111)
 
@@ -527,7 +564,6 @@ def plot_elevation_trend_comparison(
     y_mean = np.mean(points[:, 1])
 
     # 绘图
-    plt.close('all')
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # 原始数据趋势线
@@ -642,12 +678,13 @@ def plot_residual_boxplot(fitting_results=None, output_path=None, custom_data=No
     2. Grouped mode based on custom_data (group by x_col, compare y_col distribution across algorithms)
     """
     start_time = time.time()
-    plt.close('all')
     fig, ax = plt.subplots(figsize=(12, 7))
 
     # Mode 1: Use custom grouped data (priority)
     if custom_data is not None and x_col is not None and y_col is not None:
         # Parameter validation
+        if pd is None:
+            raise ImportError("pandas is required for grouped residual boxplots.")
         if not isinstance(custom_data, pd.DataFrame):
             raise ValueError("custom_data must be a pandas DataFrame")
         required_cols = ["Method", x_col, y_col]
@@ -683,7 +720,8 @@ def plot_residual_boxplot(fitting_results=None, output_path=None, custom_data=No
         for fr in fitting_results:
             if "residuals" in fr and "inliers" in fr and fr["method"]:
                 # Use absolute residuals of inliers only
-                inlier_residuals = np.abs(fr["residuals"][fr["inliers"]])
+                inlier_mask = coerce_inlier_mask(fr["inliers"], len(fr["residuals"]), method_name=fr["method"])
+                inlier_residuals = np.abs(fr["residuals"][inlier_mask])
                 if len(inlier_residuals) > 0:
                     valid_residuals.append(inlier_residuals)
                     method_names.append(fr["method"])
@@ -757,7 +795,6 @@ def plot_efficiency_comparison(data, algorithm_col=None, time_col='cpu_time',
         save_plot: 是否保存图像（默认True）
         save_path: 保存路径（仅save_plot=True时生效）
     """
-    plt.close('all')
     fig = plt.figure(figsize=(10, 6))
 
     # 1. 数据预处理：过滤无效值并计算平均值
@@ -908,7 +945,6 @@ def plot_stability_comparison(fitting_results, results_df, output_path=None,
         # Absolute intercept difference
         d_diff.append(np.abs(fr["d_est"] - baseline_d))
 
-    plt.close('all')
     fig, ax1 = plt.subplots(figsize=(10, 6))
 
     # Normal vector similarity (left Y-axis)
@@ -1003,16 +1039,24 @@ def plot_roughness_elevation_summary(
 
     # 布局与颜色范围
     n_algorithms = len(valid_results)
-    n_cols = 4
+    n_cols = min(4, n_algorithms)
     n_rows = (n_algorithms + n_cols - 1) // n_cols
-    fig_width, fig_height = 12, 6 * n_rows
+    fig_width = max(9.5, 3.55 * n_cols + 0.9)
+    fig_height = max(5.8, 4.15 * n_rows + 0.8)
     all_residuals = np.concatenate([np.abs(fr["residuals"]) for fr in valid_results])
     vmin, vmax = np.percentile(all_residuals, [1, 99])
 
     # 初始化画布
-    plt.close('all')
     fig = plt.figure(figsize=(fig_width, fig_height))
-    gs = GridSpec(n_rows * 2, n_cols, wspace=0.2, hspace=0.6)
+    gs = GridSpec(
+        n_rows * 2,
+        n_cols + 1,
+        width_ratios=[1.0] * n_cols + [0.06],
+        wspace=0.28,
+        hspace=0.62,
+    )
+    legend_handles = None
+    legend_labels = None
 
     # 绘制每个算法的子图
     for i, fr in enumerate(valid_results):
@@ -1050,7 +1094,9 @@ def plot_roughness_elevation_summary(
         )
         ax_heat.set_title(f"{method_name} - Roughness", fontsize=10, pad=8)
         ax_heat.set_xlabel("X (m)", fontsize=8)
-        ax_heat.tick_params(labelsize=7)
+        ax_heat.tick_params(labelsize=7, length=2.5)
+        ax_heat.spines["top"].set_visible(False)
+        ax_heat.spines["right"].set_visible(False)
         ax_heat.set_yticks([]) if col != 0 else ax_heat.set_ylabel("Y (m)", fontsize=8)
 
         # 2. 高程剖面子图
@@ -1058,34 +1104,64 @@ def plot_roughness_elevation_summary(
         cache = preprocess_elevation_bins(points, bin_width=bin_width)
         y_mean = np.mean(points[:, 1])
         z_plane_per_bin = -(n_est[0] * cache['x_bin_centers'] + n_est[1] * y_mean + d_est) / n_est[2]
-        ax_elev.plot(
+        line_original = ax_elev.plot(
             cache['x_bin_centers'], cache['z_median_filled'],
             'b-', linewidth=1.2, alpha=0.5,
-            label="Original (Median Trend)"
-        )
-        ax_elev.plot(
+            label="Original Median Trend"
+        )[0]
+        line_fitted = ax_elev.plot(
             cache['x_bin_centers'], z_plane_per_bin,
             'r--', linewidth=1.5, alpha=0.5,
-            label=f"Fitted ({method_name})"
-        )
-        ax_elev.axhline(y=np.median(points[:, 2]), color='gray', linestyle=':', alpha=0.5,
-                        label='Original Median')
-        ax_elev.axhline(y=np.mean(z_plane_per_bin), color='orange', linestyle=':', alpha=0.5,
-                        label=f'Plane Mean')
+            label="Fitted Plane Trend"
+        )[0]
+        line_median = ax_elev.axhline(y=np.median(points[:, 2]), color='gray', linestyle=':', alpha=0.5,
+                                      label='Original Median')
+        line_plane_mean = ax_elev.axhline(y=np.mean(z_plane_per_bin), color='orange', linestyle=':', alpha=0.5,
+                                          label='Plane Mean')
         ax_elev.set_title(f"{method_name} - Elevation", fontsize=10, pad=8)
         ax_elev.set_xlabel("X (m)", fontsize=8)
-        ax_elev.tick_params(labelsize=7)
-        ax_elev.legend(fontsize=7, loc='best')
+        ax_elev.tick_params(labelsize=7, length=2.5)
+        ax_elev.spines["top"].set_visible(False)
+        ax_elev.spines["right"].set_visible(False)
         ax_elev.grid(alpha=0.3, linestyle='--')
         ax_elev.set_yticks([]) if col != 0 else ax_elev.set_ylabel("Elevation (m)", fontsize=8)
+        if n_algorithms == 1:
+            ax_elev.legend(
+                fontsize=7.2,
+                loc='upper left',
+                frameon=False,
+                ncol=2,
+                columnspacing=1.0,
+                handlelength=2.2,
+            )
+        if legend_handles is None:
+            legend_handles = [line_original, line_fitted, line_median, line_plane_mean]
+            legend_labels = [handle.get_label() for handle in legend_handles]
 
     # 共享色条与整体标题
-    cbar_ax = fig.add_axes([0.92, 0.1, 0.02, 0.8])
+    cbar_ax = fig.add_subplot(gs[:, -1])
     cbar = fig.colorbar(im, cax=cbar_ax)
-    cbar.set_label("Roughness (m) - Absolute Residual", fontsize=8)
+    cbar.set_label("Absolute Residual (m)", fontsize=8)
     cbar.ax.tick_params(labelsize=7)
-    fig.suptitle("Roughness vs. Elevation Summary", fontsize=14, y=0.9)
-    plt.tight_layout(rect=[0, 0.0, 0.9, 0.98])
+    fig.suptitle("Roughness and Elevation Summary", fontsize=14, y=0.988, fontweight="bold")
+    if legend_handles and n_algorithms > 1:
+        fig.legend(
+            legend_handles,
+            legend_labels,
+            loc="upper center",
+            bbox_to_anchor=(0.47, 0.945),
+            ncol=min(4, len(legend_handles)),
+            frameon=False,
+            fontsize=8,
+            handlelength=2.4,
+            columnspacing=1.3,
+        )
+    fig.subplots_adjust(
+        left=0.06,
+        right=0.96,
+        bottom=0.06,
+        top=0.91 if n_algorithms == 1 else 0.86,
+    )
 
     # 保存图像
     if save_plot:

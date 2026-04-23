@@ -211,10 +211,13 @@ def run_ablation_case(
 ):
     preset = get_paper_preset(preset_name)
     case = get_ablation_case(ablation_name)
+    base_output_root = preset.output_root
+    if run_overrides and run_overrides.get("output_root"):
+        base_output_root = run_overrides["output_root"]
     merged_run_overrides = dict(case.run_overrides)
     if run_overrides:
         merged_run_overrides.update(run_overrides)
-    merged_run_overrides["output_root"] = build_ablation_output_root(preset.output_root, case)
+    merged_run_overrides["output_root"] = build_ablation_output_root(base_output_root, case)
     merged_analyzer_overrides = dict(case.analyzer_overrides)
     if analyzer_overrides:
         merged_analyzer_overrides.update(analyzer_overrides)

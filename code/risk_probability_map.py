@@ -216,17 +216,24 @@ def _save_figure(fig, save_path=None, show_plot=False, dpi=300):
     plt.close(fig)
 
 
+def _style_map_axis(ax, title):
+    ax.set_title(title, fontsize=10, pad=6)
+    ax.set_xlabel("X", fontsize=9)
+    ax.set_ylabel("Y", fontsize=9)
+    ax.tick_params(labelsize=8, length=2.5)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
 def plot_feature_maps(result, save_path=None, show_plot=False, dpi=300):
     """Plot the four core terrain features."""
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig, axes = plt.subplots(2, 2, figsize=(11.2, 9.0))
     for ax, feature_name in zip(axes.flat, FEATURE_NAMES):
         image = ax.imshow(result["features_normalized"][feature_name], origin="lower", cmap="viridis")
-        ax.set_title(feature_name.replace("_", " ").title())
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
+        _style_map_axis(ax, feature_name.replace("_", " ").title())
         fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
-    fig.suptitle("Terrain Feature Maps", fontsize=14)
-    fig.tight_layout()
+    fig.suptitle("Terrain Feature Maps", fontsize=14, y=0.97, fontweight="bold")
+    fig.subplots_adjust(left=0.06, right=0.97, bottom=0.07, top=0.92, wspace=0.20, hspace=0.22)
     _save_figure(fig, save_path=save_path, show_plot=show_plot, dpi=dpi)
 
 
@@ -241,13 +248,11 @@ def plot_risk_fusion_maps(result, save_path=None, show_plot=False, dpi=300):
         ("Final risk probability", result["risk_probability"]),
     ]
 
-    fig, axes = plt.subplots(2, 3, figsize=(14, 9))
+    fig, axes = plt.subplots(2, 3, figsize=(13.6, 8.4))
     for ax, (title, map_data) in zip(axes.flat, maps):
         image = ax.imshow(map_data, origin="lower", cmap="magma", vmin=0.0, vmax=1.0)
-        ax.set_title(title)
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
+        _style_map_axis(ax, title)
         fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
-    fig.suptitle("Risk Probability Fusion", fontsize=14)
-    fig.tight_layout()
+    fig.suptitle("Risk Probability Fusion", fontsize=14, y=0.97, fontweight="bold")
+    fig.subplots_adjust(left=0.05, right=0.98, bottom=0.07, top=0.92, wspace=0.18, hspace=0.24)
     _save_figure(fig, save_path=save_path, show_plot=show_plot, dpi=dpi)

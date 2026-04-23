@@ -65,19 +65,29 @@ Optional dependencies:
 Windows:
 
 ```powershell
-python code/run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 300
+python code/run_complete_pipeline.py --preset structured35 --pipeline-mode streaming --workers auto --simulator-profile landing --base-seed 42 --force-reprocess --no-save-vector --dpi 300
 ```
 
 Linux / Kylin:
 
 ```bash
-python3 code/run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 300
+python3 code/run_complete_pipeline.py --preset structured35 --pipeline-mode streaming --workers auto --simulator-profile landing --base-seed 42 --force-reprocess --no-save-vector --dpi 300
 ```
 
 ### Run a fast smoke-test version
 
 ```powershell
-python code/run_complete_pipeline.py --preset structured35 --workers auto --generation-workers auto --force-reprocess --no-save-vector --dpi 150 --skip-ablation --skip-paper-report --include-methods RANSAC,RobustLS-TLS,RSTLS --disable-risk --disable-safety --disable-joint
+python code/run_complete_pipeline.py --preset structured35 --pipeline-mode streaming --workers auto --simulator-profile landing --base-seed 42 --force-reprocess --no-save-vector --dpi 150 --skip-ablation --skip-paper-report --include-methods RANSAC,RobustLS-TLS,RSTLS --disable-risk --disable-safety --disable-joint
+```
+
+### Run from a reusable config file
+
+```powershell
+python code/run_complete_pipeline.py --config configs/pipeline_structured35.json
+```
+
+```powershell
+python code/run_complete_pipeline.py --config configs/pipeline_smoke.json
 ```
 
 ## Common Commands
@@ -85,7 +95,7 @@ python code/run_complete_pipeline.py --preset structured35 --workers auto --gene
 Generate structured simulation data only:
 
 ```powershell
-python code/OutlierTerrainSimulator.py --workers auto
+python code/OutlierTerrainSimulator.py --profile landing --base-seed 42 --workers auto
 ```
 
 Run the main experiment only:
@@ -105,6 +115,12 @@ Reproduce paper-style figures from existing outputs:
 ```powershell
 python code/reproduce_paper_figures.py --preset structured35
 ```
+
+Config templates:
+
+- `configs/pipeline_structured35.json`
+- `configs/pipeline_smoke.json`
+- `configs/README.md`
 
 ## Data and Paper Organization
 
@@ -139,8 +155,32 @@ For large result sharing, prefer:
 
 - CI checks syntax and entrypoint health
 - the main pipeline supports Windows and Linux/Kylin command-line usage
-- parallel execution is available for both data generation and experiment runs
+- parallel execution is available for data generation, point-cloud solving, and streaming generate-then-solve workflows
 - code, data, results, paper, and legacy scripts are now separated at the folder level
+
+## Parallel and Reproducibility
+
+- `--workers auto`
+  Uses CPU-count-based parallelism for point-cloud solving or streaming generate+solve mode.
+- `--generation-workers auto`
+  Uses separate worker control for staged generation mode.
+- `--pipeline-mode streaming`
+  Recommended. Each worker generates one outlier-ratio dataset and immediately runs the scan/solution pipeline for it.
+- `--simulator-profile landing`
+  Recommended paper-oriented simulator profile with a smoother candidate landing zone, clustered hazards, and structured artefacts.
+- `--base-seed 42`
+  Keeps the synthetic dataset reproducible across Windows and Linux/Kylin.
+- `--force-regenerate`
+  Rebuilds synthetic DEM and point-cloud files even if matching outputs already exist.
+
+## Simulation Realism
+
+- The structured simulator now combines macro relief, micro relief, clustered hazards, stripe corruption, and bad scan batches.
+- The exported point cloud is no longer a full regular grid by default; it is thinned by a LiDAR-like observation model that depends on sensor position, incidence angle, range attenuation, and edge/shadow dropouts.
+- Each generated point cloud writes a sidecar metadata JSON such as `point_cloud_10pct_metadata.json` with the nominal ratio, observed ratio, kept-point count, and sensor model parameters.
+- Recommended profile:
+  `landing`
+  This profile keeps a smoother candidate landing zone near the center while biasing hazards toward off-center clustered regions.
 
 ## Citation / Usage
 

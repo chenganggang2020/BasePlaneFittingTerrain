@@ -1,0 +1,22 @@
+{
+  "preset": "structured35",
+  "pipeline_mode": "streaming",
+  "workers": 4,
+  "generation_workers": 4,
+  "simulator_profile": "landing",
+  "base_seed": 42,
+  "force_reprocess": true,
+  "force_regenerate": false,
+  "no_save_vector": true,
+  "dpi": 300,
+  "skip_generation": false,
+  "skip_ablation": false,
+  "skip_paper_report": false,
+  "ablation": "all",
+  "ratio_start": 0.1,
+  "ratio_stop": 0.91,
+  "ratio_step": 0.01,
+  "disable_risk": false,
+  "disable_safety": false,
+  "disable_joint": false
+}

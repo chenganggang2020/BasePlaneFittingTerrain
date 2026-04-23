@@ -62,6 +62,9 @@ def load_point_cloud(file_path):
             f"请检查文件路径是否正确，或是否有读取权限。"
         ) from e
 
+    data = np.atleast_2d(data)
+    if data.shape[1] < 3:
+        raise ValueError(f"Point cloud must contain at least 3 columns, got {data.shape[1]}")
     # 提取点云和标签（逻辑不变）
     points = data[:, :3]  # 前3列是x、y、z坐标
     # 检查是否有第4列（标签列：1=外点，0=内点，无标签则默认全为内点）

@@ -185,6 +185,15 @@ def _save_figure(fig, save_path=None, show_plot=False, dpi=300):
     plt.close(fig)
 
 
+def _style_map_axis(ax, title):
+    ax.set_title(title, fontsize=10, pad=6)
+    ax.set_xlabel("X", fontsize=9)
+    ax.set_ylabel("Y", fontsize=9)
+    ax.tick_params(labelsize=8, length=2.5)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
 def plot_joint_fusion_maps(result, title=None, save_path=None, show_plot=False, dpi=300):
     """Plot macro risk, micro safety, and their fused maps."""
     maps = [
@@ -194,17 +203,15 @@ def plot_joint_fusion_maps(result, title=None, save_path=None, show_plot=False, 
         ("Joint safe score", result["joint_safe_score"], "viridis"),
     ]
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig, axes = plt.subplots(2, 2, figsize=(11.4, 9.2))
     for ax, (map_title, map_data, cmap) in zip(axes.flat, maps):
         image = ax.imshow(map_data, origin="lower", cmap=cmap, vmin=0.0, vmax=1.0)
-        ax.set_title(map_title)
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
+        _style_map_axis(ax, map_title)
         fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
 
     if title:
-        fig.suptitle(title, fontsize=14)
-    fig.tight_layout()
+        fig.suptitle(title, fontsize=14, y=0.97, fontweight="bold")
+    fig.subplots_adjust(left=0.06, right=0.97, bottom=0.07, top=0.92, wspace=0.22, hspace=0.24)
     _save_figure(fig, save_path=save_path, show_plot=show_plot, dpi=dpi)
 
 
@@ -228,8 +235,11 @@ def plot_joint_safe_window_map(result, title=None, save_path=None, show_plot=Fal
     fig.colorbar(image, ax=ax, label="Joint safe score")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(labelsize=8, length=2.5)
     if title:
-        ax.set_title(title)
+        ax.set_title(title, fontsize=12, pad=8)
 
     if best_window is not None:
         dx = x_grid[0, 1] - x_grid[0, 0] if x_grid.shape[1] > 1 else 1.0
@@ -253,5 +263,5 @@ def plot_joint_safe_window_map(result, title=None, save_path=None, show_plot=Fal
         )
         ax.legend(loc="upper right")
 
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.09, right=0.94, bottom=0.10, top=0.90)
     _save_figure(fig, save_path=save_path, show_plot=show_plot, dpi=dpi)

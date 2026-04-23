@@ -23,7 +23,12 @@ except ImportError:  # pragma: no cover - optional dependency
         return _TqdmFallback(iterable=iterable, **kwargs)
 from export_utils import export_to_cloudcompare, export_to_matlab
 from utils import load_point_cloud, downsample_data, extract_outlier_ratio, parse_array_from_string
-from metrics import calculate_detection_metrics, calculate_angle_between_vectors,calculate_d_est_difference
+from metrics import (
+    calculate_detection_metrics,
+    calculate_angle_between_vectors,
+    calculate_d_est_difference,
+    normalize_inlier_mask,
+)
 from algorithm_runner import get_algorithm_categories
 from visualization import generate_monte_carlo_plots, generate_single_trial_plots
 import matplotlib.pyplot as plt
@@ -31,7 +36,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 from constants import ALGORITHM_COLORS, ALGORITHM_MARKERS, PLOT_CONFIG
 from visualizer import plot_roughness_heatmap, plot_common_3d_terrain, plot_elevation_profile, \
     plot_elevation_trend_comparison, plot_roughness_elevation_summary
-from matplotlib.ticker import ScalarFormatter, FormatStrFormatter, LogFormatterExponent
+from matplotlib.ticker import ScalarFormatter, FormatStrFormatter, FuncFormatter
 from safety_evaluation import (
     compare_safety_maps,
     evaluate_plane_safety,
@@ -148,13 +153,19 @@ def _metric_is_bounded(metric):
 def _should_use_log_scale(metric, values):
     if metric not in LOG_CANDIDATE_METRICS:
         return False
-    if any(value <= 0 for value in values):
-        return False
     positive = [value for value in values if value > 0]
     if len(positive) < 3:
         return False
     dynamic_range = max(positive) / max(min(positive), 1e-12)
     return dynamic_range >= 20
+
+
+def _sanitize_for_log_scale(values):
+    positive = [value for value in values if value > 0]
+    if not positive:
+        return list(values)
+    floor = max(min(positive) * 0.8, 1e-6)
+    return [value if value > 0 else floor for value in values]
 
 
 def _compute_linear_limits(values, bounded=False, lower_bound=None, upper_bound=None):
@@ -183,6 +194,22 @@ def _compute_linear_limits(values, bounded=False, lower_bound=None, upper_bound=
     return y_min, y_max
 
 
+def _format_log_tick(value, _position=None):
+    if value <= 0 or np.isnan(value):
+        return ""
+    if value >= 10:
+        return f"{value:.0f}" if np.isclose(value, round(value)) else f"{value:.1f}"
+    if value >= 1:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+    if value >= 0.1:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+    if value >= 0.01:
+        return f"{value:.3f}".rstrip("0").rstrip(".")
+    if value >= 0.001:
+        return f"{value:.4f}".rstrip("0").rstrip(".")
+    return f"{value:.1e}"
+
+
 def _style_journal_axis(ax, metric, use_log_scale=False):
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -195,11 +222,141 @@ def _style_journal_axis(ax, metric, use_log_scale=False):
 
     if use_log_scale:
         ax.set_yscale("log")
-        ax.yaxis.set_major_formatter(LogFormatterExponent())
+        ax.yaxis.set_major_formatter(FuncFormatter(_format_log_tick))
     elif _metric_is_bounded(metric):
         ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
     else:
         ax.yaxis.set_major_formatter(ScalarFormatter())
+
+
+def _set_x_limits_with_padding(ax, x_values, default_pad=0.6):
+    if not x_values:
+        return
+    x_min = min(x_values)
+    x_max = max(x_values)
+    if np.isclose(x_min, x_max):
+        pad = max(abs(x_min) * 0.08, default_pad)
+        ax.set_xlim(x_min - pad, x_max + pad)
+    else:
+        ax.set_xlim(x_min, x_max)
+
+
+def _compute_focus_xlim(x_values, focus_min=10, focus_max=40):
+    if not x_values:
+        return focus_min, focus_max
+    x_values = sorted(set(x_values))
+    in_focus = [value for value in x_values if focus_min <= value <= focus_max]
+    if len(in_focus) >= 2:
+        return focus_min, focus_max
+    if len(x_values) <= 2:
+        center = float(np.mean(x_values))
+        pad = max(abs(center) * 0.08, 2.5)
+        return center - pad, center + pad
+    left = max(min(x_values), focus_min)
+    right = min(max(x_values), focus_max)
+    if np.isclose(left, right):
+        pad = max(abs(left) * 0.08, 2.0)
+        return left - pad, right + pad
+    return left, right
+
+
+def _format_summary_value(value):
+    return "nan" if np.isnan(value) else f"{value:.3f}"
+
+
+def _build_method_summary_rows(plotted_methods, agg_df, inset_series_by_method, metric):
+    rows = []
+    for method in plotted_methods:
+        metric_pairs = _extract_metric_pairs(agg_df, metric, method=method)
+        full_mean = mean_ignore_nan([pair[1] for pair in metric_pairs])
+        inset_mean = mean_ignore_nan([pair[1] for pair in inset_series_by_method.get(method, [])])
+        rows.append([
+            method,
+            _format_summary_value(full_mean),
+            _format_summary_value(inset_mean),
+        ])
+    return rows
+
+
+def _build_single_series_summary_rows(x_values, y_values, focus_pairs):
+    focus_values = [pair[1] for pair in focus_pairs]
+    return [
+        ["Samples", str(len(y_values)), ""],
+        ["Mean", _format_summary_value(mean_ignore_nan(y_values)), ""],
+        ["Min", _format_summary_value(min(y_values)), ""],
+        ["Max", _format_summary_value(max(y_values)), ""],
+        ["Focus Avg", _format_summary_value(mean_ignore_nan(focus_values)), ""],
+    ]
+
+
+def _draw_summary_table(ax, headers, rows, title=None, y_start=0.98, height=0.42):
+    ax.set_axis_off()
+    if title:
+        ax.text(
+            0.02,
+            y_start,
+            title,
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9.4,
+            fontweight="bold",
+        )
+    if not rows:
+        return None
+    table = ax.table(
+        cellText=rows,
+        colLabels=headers,
+        cellLoc="center",
+        colLoc="center",
+        bbox=[0.02, max(0.03, y_start - height), 0.96, height - 0.03],
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(8.0)
+    table.scale(1.0, 1.18)
+    for (row_idx, col_idx), cell in table.get_celld().items():
+        if row_idx == 0:
+            cell.set_facecolor("#f0f2f5")
+            cell.set_text_props(weight="bold")
+        else:
+            cell.set_facecolor("#fbfbfc" if row_idx % 2 else "#f6f7f9")
+        cell.set_edgecolor("#d9dce1")
+        cell.set_linewidth(0.6)
+    return table
+
+
+def _inliers_match_point_count(inliers, point_count):
+    if inliers is None:
+        return True
+    arr = np.asarray(inliers)
+    if arr.size == 0:
+        return True
+    if np.issubdtype(arr.dtype, np.bool_):
+        return arr.size == point_count
+    if np.issubdtype(arr.dtype, np.integer):
+        flat = arr.reshape(-1)
+        return np.all((flat >= 0) & (flat < point_count))
+    return False
+
+
+def _residuals_match_point_count(residuals, point_count):
+    if residuals is None:
+        return True
+    arr = np.asarray(residuals)
+    return arr.size in (0, point_count)
+
+
+def _fitting_results_match_point_count(fitting_results, point_count):
+    if point_count <= 0:
+        return True
+    for fr in fitting_results:
+        if fr.get("n_est") is None or fr.get("d_est") is None:
+            continue
+        if not _inliers_match_point_count(fr.get("inliers"), point_count):
+            return False
+        if not _residuals_match_point_count(fr.get("residuals"), point_count):
+            return False
+    return True
 
 
 def _analyze_point_cloud_worker(analyzer_kwargs, task_kwargs):
@@ -409,6 +566,105 @@ class PointCloudAnalyzer:
 
         return rows
 
+    def _collect_point_cloud_files_with_ratio(self, point_cloud_dir):
+        pc_files = [f for f in os.listdir(point_cloud_dir) if f.endswith((".txt", ".xyz"))]
+        pc_files_with_ratio = []
+        for file_name in pc_files:
+            try:
+                outlier_ratio = extract_outlier_ratio(file_name)
+                pc_files_with_ratio.append((file_name, outlier_ratio))
+            except ValueError as exc:
+                print(f"Warning: skipping file {file_name}: {exc}")
+        pc_files_with_ratio.sort(key=lambda item: item[1])
+        return pc_files_with_ratio
+
+    def _build_sweep_tasks(self, pc_files_with_ratio, point_cloud_dir, output_root, force_reprocess, dpi, eps_mapping):
+        tasks = []
+        for file_name, outlier_ratio in pc_files_with_ratio:
+            tasks.append({
+                "file_name": file_name,
+                "outlier_ratio": outlier_ratio,
+                "eps": eps_mapping(outlier_ratio),
+                "point_cloud_dir": point_cloud_dir,
+                "output_root": output_root,
+                "force_reprocess": force_reprocess,
+                "dpi": dpi,
+            })
+        return tasks
+
+    def _load_existing_result_rows(self, pc_files_with_ratio, output_root):
+        rows = []
+        for file_name, _ in pc_files_with_ratio:
+            point_cloud_name = os.path.splitext(file_name)[0]
+            pc_results_csv = os.path.join(output_root, point_cloud_name, f"{point_cloud_name}_results.csv")
+            if not os.path.exists(pc_results_csv):
+                continue
+            existing_rows = read_rows_from_csv(pc_results_csv)
+            if existing_rows:
+                rows.extend(existing_rows)
+        return rows
+
+    def finalize_outlier_sweep(self, point_cloud_dir, output_root, result_rows_collection=None,
+                               eps_mapping=None, dpi=2000, save_vector=False):
+        if eps_mapping is None:
+            eps_mapping = _identity_eps_mapping
+
+        os.makedirs(output_root, exist_ok=True)
+        global_comparison_dir = os.path.join(output_root, "global_comparison_plots")
+        os.makedirs(global_comparison_dir, exist_ok=True)
+
+        pc_files_with_ratio = self._collect_point_cloud_files_with_ratio(point_cloud_dir)
+        if not pc_files_with_ratio:
+            print("Warning: no valid point-cloud files were found.")
+            return []
+
+        sample_eps = eps_mapping(pc_files_with_ratio[0][1])
+        algo_categories = self._get_algorithm_categories(sample_eps)
+        all_methods = algo_categories["all_methods"]
+
+        global_results_list = []
+        for result_rows in result_rows_collection or []:
+            if result_rows:
+                global_results_list.extend(result_rows)
+
+        if not global_results_list:
+            global_results_list = self._load_existing_result_rows(pc_files_with_ratio, output_root)
+
+        if not global_results_list:
+            print("\nWarning: no global result rows were produced, so comparison plots were skipped.")
+            return []
+
+        method_order = {method: index for index, method in enumerate(all_methods)}
+        global_agg_rows = sorted(
+            global_results_list,
+            key=lambda row: (
+                to_float(row.get("Outlier Ratio"), default=np.inf),
+                method_order.get(row.get("Method"), len(all_methods)),
+            ),
+        )
+        global_agg_csv = os.path.join(global_comparison_dir, "global_aggregated_results.csv")
+        write_rows_to_csv(global_agg_csv, global_agg_rows)
+        print(f"\nSaved global aggregated results to: {global_agg_csv}")
+
+        self.generate_outlier_ratio_plots(global_agg_rows, all_methods, global_comparison_dir, dpi, save_vector)
+
+        global_risk_rows = self._collect_global_risk_summaries(pc_files_with_ratio, output_root)
+        if global_risk_rows:
+            global_risk_rows = sorted(
+                global_risk_rows,
+                key=lambda row: to_float(row.get("Outlier Ratio"), default=np.inf),
+            )
+            global_risk_csv = os.path.join(global_comparison_dir, "global_risk_results.csv")
+            write_rows_to_csv(global_risk_csv, global_risk_rows)
+            print(f"Saved global risk summary to: {global_risk_csv}")
+            self.generate_global_risk_probability_plots(
+                global_risk_rows,
+                global_comparison_dir,
+                dpi=dpi,
+                save_vector=save_vector,
+            )
+        return global_agg_rows
+
     def generate_global_risk_probability_plots(self, risk_rows, comparison_dir, dpi=1200, save_vector=False):
         """Generate point-cloud-level risk probability trend plots across outlier ratios."""
         if not risk_rows:
@@ -437,35 +693,147 @@ class PointCloudAnalyzer:
                     continue
                 x_values = [pair[0] for pair in metric_pairs]
                 y_values = [pair[1] for pair in metric_pairs]
-
-                fig, ax = plt.subplots(figsize=PLOT_CONFIG["figsize"])
-                ax.plot(
-                    x_values,
-                    y_values,
-                    color="#bc4749",
-                    linewidth=1.8,
-                    marker="o",
-                    markersize=4,
+                focus_xlim = _compute_focus_xlim(x_values, focus_min=10, focus_max=40)
+                focus_pairs = [pair for pair in metric_pairs if focus_xlim[0] <= pair[0] <= focus_xlim[1]]
+                use_zoom = len(x_values) >= 4
+                use_log_scale = _should_use_log_scale(metric, y_values)
+                plot_y_values = _sanitize_for_log_scale(y_values) if use_log_scale else y_values
+                plot_focus_values = (
+                    _sanitize_for_log_scale([pair[1] for pair in focus_pairs])
+                    if use_log_scale and focus_pairs
+                    else [pair[1] for pair in focus_pairs]
                 )
-                ax.set_title(f"Outlier Ratio vs {metric}", fontsize=PLOT_CONFIG["title_size"])
-                ax.set_xlabel("Outlier Ratio (%)", fontsize=PLOT_CONFIG["font_size"])
-                ax.set_ylabel(metric, fontsize=PLOT_CONFIG["font_size"])
-                ax.grid(linestyle=PLOT_CONFIG["grid_style"], alpha=PLOT_CONFIG["grid_alpha"])
 
-                avg_value = mean_ignore_nan(y_values)
-                if not np.isnan(avg_value):
-                    ax.text(
-                        0.98,
-                        0.98,
-                        f"Avg: {avg_value:.3f}",
-                        transform=ax.transAxes,
-                        fontsize=PLOT_CONFIG["font_size"] * 0.8,
-                        verticalalignment="top",
-                        horizontalalignment="right",
-                        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8, ec="gray"),
+                with plt.rc_context({
+                    "font.family": ["Times New Roman", "DejaVu Serif", "serif"],
+                    "axes.unicode_minus": True,
+                    "axes.labelsize": 11,
+                    "axes.titlesize": 10,
+                    "xtick.labelsize": 9,
+                    "ytick.labelsize": 9,
+                }):
+                    if use_zoom:
+                        fig = plt.figure(figsize=(9.6, 5.8))
+                        grid = fig.add_gridspec(
+                            2,
+                            2,
+                            width_ratios=[4.9, 1.45],
+                            height_ratios=[2.15, 1.10],
+                            wspace=0.08,
+                            hspace=0.18,
+                        )
+                        ax_main = fig.add_subplot(grid[0, 0])
+                        ax_zoom = fig.add_subplot(grid[1, 0], sharex=None)
+                        ax_side = fig.add_subplot(grid[:, 1])
+                    else:
+                        fig = plt.figure(figsize=(8.8, 4.5))
+                        grid = fig.add_gridspec(1, 2, width_ratios=[4.8, 1.5], wspace=0.08)
+                        ax_main = fig.add_subplot(grid[0, 0])
+                        ax_zoom = None
+                        ax_side = fig.add_subplot(grid[0, 1])
+
+                    line = ax_main.plot(
+                        x_values,
+                        plot_y_values,
+                        color="#b23a48",
+                        linewidth=2.0,
+                        marker="o",
+                        markersize=4.8,
+                        markeredgewidth=0.45,
+                        markeredgecolor="white",
+                    )[0]
+                    ax_main.axvspan(focus_xlim[0], focus_xlim[1], color="#eef4fb", alpha=0.55, zorder=0)
+                    avg_value = mean_ignore_nan(y_values)
+                    if not np.isnan(avg_value):
+                        ax_main.axhline(
+                            avg_value,
+                            color="#6c757d",
+                            linestyle="--",
+                            linewidth=1.0,
+                            alpha=0.75,
+                        )
+
+                    _style_journal_axis(ax_main, metric, use_log_scale=use_log_scale)
+                    ax_main.set_ylabel(metric)
+                    ax_main.set_xlabel("Outlier Ratio (%)")
+                    _set_x_limits_with_padding(ax_main, x_values)
+
+                    if use_log_scale:
+                        positive_values = [value for value in plot_y_values if value > 0]
+                        if positive_values:
+                            ax_main.set_ylim(min(positive_values) * 0.92, max(positive_values) * 1.10)
+                    else:
+                        full_limits = _compute_linear_limits(y_values, bounded=_metric_is_bounded(metric))
+                        if full_limits:
+                            ax_main.set_ylim(*full_limits)
+
+                    if ax_zoom is not None:
+                        zoom_x_values = [pair[0] for pair in focus_pairs] if focus_pairs else x_values
+                        zoom_y_values = (
+                            plot_focus_values if focus_pairs else plot_y_values
+                        )
+                        ax_zoom.plot(
+                            zoom_x_values,
+                            zoom_y_values,
+                            color="#b23a48",
+                            linewidth=1.8,
+                            marker="o",
+                            markersize=4.2,
+                            markeredgewidth=0.45,
+                            markeredgecolor="white",
+                        )
+                        _style_journal_axis(ax_zoom, metric, use_log_scale=use_log_scale)
+                        ax_zoom.set_xlabel("Outlier Ratio (%)")
+                        ax_zoom.set_ylabel(metric)
+                        ax_zoom.set_xlim(*focus_xlim)
+                        zoom_values = zoom_y_values if use_log_scale else (
+                            [pair[1] for pair in focus_pairs] if focus_pairs else y_values
+                        )
+                        if use_log_scale:
+                            positive_zoom = [value for value in zoom_values if value > 0]
+                            if positive_zoom:
+                                ax_zoom.set_ylim(min(positive_zoom) * 0.92, max(positive_zoom) * 1.08)
+                        else:
+                            zoom_limits = _compute_linear_limits(zoom_values, bounded=_metric_is_bounded(metric))
+                            if zoom_limits:
+                                ax_zoom.set_ylim(*zoom_limits)
+
+                    title = metric if len(metric) <= 28 else metric.replace("Probability", "Prob.")
+                    fig.suptitle(title, fontsize=13.5, y=0.975, fontweight="bold")
+
+                    ax_side.set_axis_off()
+                    ax_side.legend(
+                        [line],
+                        ["Risk pipeline"],
+                        loc="upper left",
+                        frameon=False,
+                        title="Series",
+                        title_fontsize=9.2,
+                        fontsize=8.4,
+                        handlelength=2.6,
                     )
+                    summary_rows = _build_single_series_summary_rows(x_values, y_values, focus_pairs)
+                    _draw_summary_table(
+                        ax_side,
+                        headers=["Statistic", "Value", ""],
+                        rows=summary_rows,
+                        title="Summary",
+                        y_start=0.80,
+                        height=0.40,
+                    )
+                    ax_side.text(
+                        0.02,
+                        0.24,
+                        f"Focus window\n{focus_xlim[0]:.1f}% to {focus_xlim[1]:.1f}%",
+                        transform=ax_side.transAxes,
+                        ha="left",
+                        va="top",
+                        fontsize=8.6,
+                        color="#4b5563",
+                        bbox=dict(boxstyle="round,pad=0.35", facecolor="#f7f9fc", edgecolor="#d7dde6"),
+                    )
+                    fig.subplots_adjust(left=0.08, right=0.97, top=0.90, bottom=0.12)
 
-                plt.tight_layout()
                 plot_png = os.path.join(comparison_dir, f"risk_outlier_vs_{_sanitize_metric_name(metric)}.png")
                 fig.savefig(plot_png, dpi=dpi, bbox_inches="tight")
                 if save_vector:
@@ -700,27 +1068,15 @@ class PointCloudAnalyzer:
                 fitting_dict["inliers"] = inliers if inliers is not None else []
                 fitting_dict["cpu_time"] = cpu_time
 
-                inliers = fitting_dict["inliers"]
-                if isinstance(inliers, np.ndarray) and inliers.dtype == bool:
-                    inlier_count = int(np.sum(inliers))
-                elif isinstance(inliers, list) and len(inliers) > 0 and isinstance(inliers[0], (bool, np.bool_)):
-                    inlier_count = int(np.sum(inliers))
-                elif isinstance(inliers, (list, np.ndarray)):
-                    inlier_count = len(inliers)
-                else:
-                    inlier_count = 0
                 total_points = len(points)
+                inlier_mask = normalize_inlier_mask(fitting_dict["inliers"], total_points)
+                inlier_count = int(np.sum(inlier_mask)) if inlier_mask is not None else 0
                 inlier_ratio = inlier_count / total_points if total_points > 0 else 0
                 mean_residual = np.nan
 
                 residuals = fitting_dict["residuals"]
-                if inlier_count > 0 and len(residuals) > 0:
-                    if isinstance(inliers, np.ndarray) and inliers.dtype == bool:
-                        inlier_residuals = residuals[inliers]
-                    elif isinstance(inliers, list) and len(inliers) > 0 and isinstance(inliers[0], int):
-                        inlier_residuals = residuals[inliers]
-                    else:
-                        inlier_residuals = []
+                if inlier_count > 0 and len(residuals) == total_points and inlier_mask is not None:
+                    inlier_residuals = residuals[inlier_mask]
                     mean_residual = np.mean(inlier_residuals) if len(inlier_residuals) > 0 else np.nan
 
                 metric_results.append({
@@ -770,7 +1126,8 @@ class PointCloudAnalyzer:
             inliers = fr.get("inliers", [])
             metrics = calculate_detection_metrics(labels, inliers)
             deviation_angle = calculate_angle_between_vectors(fr.get("n_est"), self.initial_plane_normal)
-            d_diff = calculate_d_est_difference(fr.get("d_est", 0.0),self.initial_plane_interception)
+            d_est_value = to_float(fr.get("d_est"))
+            d_diff = calculate_d_est_difference(d_est_value, self.initial_plane_interception)
             n_est_str = array_to_csv_string(fr.get("n_est"))
             residuals_str = array_to_csv_string(fr.get("residuals", np.array([])))
             inliers_str = array_to_csv_string(fr.get("inliers", []))
@@ -781,7 +1138,7 @@ class PointCloudAnalyzer:
                 "Outlier Ratio (%)": outlier_ratio * 100,
                 "File Name": file_name,
                 "n_est": n_est_str,
-                "d_est": float(fr.get("d_est", 0.0)),
+                "d_est": d_est_value,
                 "residuals": residuals_str,
                 "inliers": inliers_str,
                 "Normal Deviation (deg)": deviation_angle,
@@ -826,7 +1183,14 @@ class PointCloudAnalyzer:
             if use_cache:
                 print(f"Using cached results: {pc_results_csv}")
                 fitting_results = self._load_fitting_from_cache(pc_results_csv)
-            else:
+                if not _fitting_results_match_point_count(fitting_results, len(points)):
+                    print(
+                        f"Cache mismatch detected for {point_cloud_name}: "
+                        f"cached arrays do not match {len(points)} points. Recomputing."
+                    )
+                    use_cache = False
+
+            if not use_cache:
                 print(f"Processing {file_name}: points={len(points)}, outlier_ratio={outlier_ratio * 100:.1f}%")
                 algo_categories = self._get_algorithm_categories(eps)
                 stochastic_methods = algo_categories["stochastic_methods"]
@@ -991,43 +1355,28 @@ class PointCloudAnalyzer:
         """Pure-stdlib outlier ratio sweep."""
         np.random.seed(random_seed)
         os.makedirs(output_root, exist_ok=True)
-        global_comparison_dir = os.path.join(output_root, "global_comparison_plots")
-        os.makedirs(global_comparison_dir, exist_ok=True)
 
         if eps_mapping is None:
             eps_mapping = _identity_eps_mapping
 
-        pc_files = [f for f in os.listdir(point_cloud_dir) if f.endswith((".txt", ".xyz"))]
-        pc_files_with_ratio = []
-        for file in pc_files:
-            try:
-                ratio = extract_outlier_ratio(file)
-                pc_files_with_ratio.append((file, ratio))
-            except ValueError as e:
-                print(f"Warning: skipping file {file}: {e}")
-        pc_files_with_ratio.sort(key=lambda item: item[1])
-
+        pc_files_with_ratio = self._collect_point_cloud_files_with_ratio(point_cloud_dir)
         if not pc_files_with_ratio:
             print("Warning: no valid point-cloud files were found.")
             return []
 
         sample_eps = eps_mapping(pc_files_with_ratio[0][1])
         algo_categories = self._get_algorithm_categories(sample_eps)
-        all_methods = algo_categories["all_methods"]
         max_workers = min(_resolve_max_workers(max_workers), len(pc_files_with_ratio))
 
         print(f"\n===== Processing all point clouds (count={len(pc_files_with_ratio)}) =====")
-        tasks = []
-        for file_name, outlier_ratio in pc_files_with_ratio:
-            tasks.append({
-                "file_name": file_name,
-                "outlier_ratio": outlier_ratio,
-                "eps": eps_mapping(outlier_ratio),
-                "point_cloud_dir": point_cloud_dir,
-                "output_root": output_root,
-                "force_reprocess": force_reprocess,
-                "dpi": dpi,
-            })
+        tasks = self._build_sweep_tasks(
+            pc_files_with_ratio,
+            point_cloud_dir,
+            output_root,
+            force_reprocess,
+            dpi,
+            eps_mapping,
+        )
 
         results = []
         if max_workers <= 1:
@@ -1057,45 +1406,14 @@ class PointCloudAnalyzer:
                 finally:
                     progress.close()
 
-        global_results_list = []
-        for result_rows in results:
-            if result_rows:
-                global_results_list.extend(result_rows)
-
-        if not global_results_list:
-            print("\nWarning: no global result rows were produced, so comparison plots were skipped.")
-            return []
-
-        method_order = {method: index for index, method in enumerate(all_methods)}
-        global_agg_rows = sorted(
-            global_results_list,
-            key=lambda row: (
-                to_float(row.get("Outlier Ratio"), default=np.inf),
-                method_order.get(row.get("Method"), len(all_methods)),
-            ),
+        return self.finalize_outlier_sweep(
+            point_cloud_dir=point_cloud_dir,
+            output_root=output_root,
+            result_rows_collection=results,
+            eps_mapping=eps_mapping,
+            dpi=dpi,
+            save_vector=save_vector,
         )
-        global_agg_csv = os.path.join(global_comparison_dir, "global_aggregated_results.csv")
-        write_rows_to_csv(global_agg_csv, global_agg_rows)
-        print(f"\nSaved global aggregated results to: {global_agg_csv}")
-
-        self.generate_outlier_ratio_plots(global_agg_rows, all_methods, global_comparison_dir, dpi, save_vector)
-
-        global_risk_rows = self._collect_global_risk_summaries(pc_files_with_ratio, output_root)
-        if global_risk_rows:
-            global_risk_rows = sorted(
-                global_risk_rows,
-                key=lambda row: to_float(row.get("Outlier Ratio"), default=np.inf),
-            )
-            global_risk_csv = os.path.join(global_comparison_dir, "global_risk_results.csv")
-            write_rows_to_csv(global_risk_csv, global_risk_rows)
-            print(f"Saved global risk summary to: {global_risk_csv}")
-            self.generate_global_risk_probability_plots(
-                global_risk_rows,
-                global_comparison_dir,
-                dpi=dpi,
-                save_vector=save_vector,
-            )
-        return global_agg_rows
 
     def generate_outlier_ratio_plots(self, agg_df, all_methods, comparison_dir, dpi=1200, save_vector=False):
         """Generate outlier-ratio trend plots using plain row records."""
@@ -1128,11 +1446,11 @@ class PointCloudAnalyzer:
 
         for metric in numeric_cols:
             try:
-                x_min_inset, x_max_inset = 10, 40
                 inset_series_by_method = {}
                 all_metric_values = []
                 plotted_methods = []
                 method_handles = []
+                method_metric_pairs = {}
 
                 with plt.rc_context({
                     "font.family": ["Times New Roman", "DejaVu Serif", "serif"],
@@ -1143,76 +1461,124 @@ class PointCloudAnalyzer:
                     "xtick.labelsize": 9,
                     "ytick.labelsize": 9,
                 }):
-                    fig = plt.figure(figsize=(10.6, 6.6))
-                    grid = fig.add_gridspec(
-                        2,
-                        1,
-                        height_ratios=[2.4, 1.15],
-                        hspace=0.14,
-                    )
-                    ax_main = fig.add_subplot(grid[0, 0])
-                    ax_zoom = fig.add_subplot(grid[1, 0])
-
                     for method in all_methods:
                         metric_pairs = _extract_metric_pairs(agg_df, metric, method=method)
                         if not metric_pairs:
                             continue
 
+                        method_metric_pairs[method] = metric_pairs
                         x_values = [pair[0] for pair in metric_pairs]
                         y_values = [pair[1] for pair in metric_pairs]
-                        inset_pairs = [
-                            pair for pair in metric_pairs
-                            if x_min_inset <= pair[0] <= x_max_inset
-                        ]
-                        inset_series_by_method[method] = inset_pairs
                         all_metric_values.extend(y_values)
                         plotted_methods.append(method)
-
-                        line_style = dict(
-                            color=ALGORITHM_COLORS.get(method, "#333333"),
-                            linewidth=1.8,
-                            marker=ALGORITHM_MARKERS.get(method, "o"),
-                            markersize=4.2,
-                            markeredgecolor="white",
-                            markeredgewidth=0.45,
-                            markevery=max(1, len(x_values) // 10),
-                        )
-                        line = ax_main.plot(x_values, y_values, label=method, **line_style)[0]
-                        if inset_pairs:
-                            inset_x = [pair[0] for pair in inset_pairs]
-                            inset_y = [pair[1] for pair in inset_pairs]
-                            ax_zoom.plot(inset_x, inset_y, **line_style)
-                        method_handles.append(line)
 
                     if not plotted_methods:
                         plt.close(fig)
                         continue
 
                     use_log_scale = _should_use_log_scale(metric, all_metric_values)
+                    plot_values_by_method = {
+                        method: (
+                            _sanitize_for_log_scale([pair[1] for pair in method_metric_pairs[method]])
+                            if use_log_scale else
+                            [pair[1] for pair in method_metric_pairs[method]]
+                        )
+                        for method in plotted_methods
+                    }
+                    full_x_values = sorted({
+                        pair[0]
+                        for method in plotted_methods
+                        for pair in method_metric_pairs[method]
+                    })
+                    focus_xlim = _compute_focus_xlim(full_x_values, focus_min=10, focus_max=40)
+                    use_zoom = len(full_x_values) >= 4
+
+                    if use_zoom:
+                        fig = plt.figure(figsize=(10.8, 6.25))
+                        grid = fig.add_gridspec(
+                            2,
+                            2,
+                            width_ratios=[4.95, 1.55],
+                            height_ratios=[2.25, 1.15],
+                            wspace=0.08,
+                            hspace=0.18,
+                        )
+                        ax_main = fig.add_subplot(grid[0, 0])
+                        ax_zoom = fig.add_subplot(grid[1, 0])
+                        ax_side = fig.add_subplot(grid[:, 1])
+                    else:
+                        fig = plt.figure(figsize=(9.4, 4.8))
+                        grid = fig.add_gridspec(1, 2, width_ratios=[4.85, 1.55], wspace=0.08)
+                        ax_main = fig.add_subplot(grid[0, 0])
+                        ax_zoom = None
+                        ax_side = fig.add_subplot(grid[0, 1])
+
+                    ax_main.axvspan(focus_xlim[0], focus_xlim[1], color="#eef4fb", alpha=0.55, zorder=0)
+                    for method in plotted_methods:
+                        metric_pairs = method_metric_pairs[method]
+                        inset_pairs = [
+                            pair for pair in metric_pairs
+                            if focus_xlim[0] <= pair[0] <= focus_xlim[1]
+                        ]
+                        inset_series_by_method[method] = inset_pairs
+                        line_style = dict(
+                            color=ALGORITHM_COLORS.get(method, "#333333"),
+                            linewidth=1.8,
+                            marker=ALGORITHM_MARKERS.get(method, "o"),
+                            markersize=4.1,
+                            markeredgecolor="white",
+                            markeredgewidth=0.42,
+                            markevery=max(1, len(metric_pairs) // 10),
+                        )
+                        x_values = [pair[0] for pair in metric_pairs]
+                        y_values = plot_values_by_method[method]
+                        line = ax_main.plot(x_values, y_values, label=method, **line_style)[0]
+                        method_handles.append(line)
+                        zoom_pairs = inset_pairs if inset_pairs else metric_pairs
+                        zoom_y_values = (
+                            _sanitize_for_log_scale([pair[1] for pair in zoom_pairs])
+                            if use_log_scale else
+                            [pair[1] for pair in zoom_pairs]
+                        )
+                        if ax_zoom is not None:
+                            ax_zoom.plot(
+                                [pair[0] for pair in zoom_pairs],
+                                zoom_y_values,
+                                **line_style,
+                            )
+
                     _style_journal_axis(ax_main, metric, use_log_scale=use_log_scale)
-                    _style_journal_axis(ax_zoom, metric, use_log_scale=use_log_scale)
+                    if ax_zoom is not None:
+                        _style_journal_axis(ax_zoom, metric, use_log_scale=use_log_scale)
 
                     ax_main.set_ylabel(metric)
-                    ax_main.tick_params(labelbottom=False)
-                    ax_zoom.set_xlabel("Outlier Ratio (%)")
-                    ax_zoom.set_ylabel(metric)
-
-                    full_x_values = sorted({pair[0] for method in plotted_methods for pair in _extract_metric_pairs(agg_df, metric, method=method)})
-                    if full_x_values:
-                        ax_main.set_xlim(min(full_x_values), max(full_x_values))
-                    ax_zoom.set_xlim(x_min_inset, x_max_inset)
+                    _set_x_limits_with_padding(ax_main, full_x_values)
+                    if ax_zoom is not None:
+                        ax_main.tick_params(labelbottom=False)
+                        ax_zoom.set_xlabel("Outlier Ratio (%)")
+                        ax_zoom.set_ylabel(metric)
+                        ax_zoom.set_xlim(*focus_xlim)
+                    else:
+                        ax_main.set_xlabel("Outlier Ratio (%)")
 
                     if use_log_scale:
-                        positive_all = [value for value in all_metric_values if value > 0]
-                        positive_inset = [
-                            pair[1]
+                        all_plot_metric_values = [
+                            value
                             for method in plotted_methods
-                            for pair in inset_series_by_method.get(method, [])
-                            if pair[1] > 0
+                            for value in plot_values_by_method[method]
+                        ]
+                        positive_all = [value for value in all_plot_metric_values if value > 0]
+                        positive_inset = [
+                            value
+                            for method in plotted_methods
+                            for value in _sanitize_for_log_scale(
+                                [pair[1] for pair in inset_series_by_method.get(method, [])]
+                            )
+                            if value > 0
                         ]
                         if positive_all:
                             ax_main.set_ylim(min(positive_all) * 0.88, max(positive_all) * 1.15)
-                        if positive_inset:
+                        if ax_zoom is not None and positive_inset:
                             ax_zoom.set_ylim(min(positive_inset) * 0.9, max(positive_inset) * 1.12)
                     else:
                         full_limits = _compute_linear_limits(
@@ -1230,55 +1596,71 @@ class PointCloudAnalyzer:
                         )
                         if full_limits:
                             ax_main.set_ylim(*full_limits)
-                        if inset_limits:
+                        if ax_zoom is not None and inset_limits:
                             ax_zoom.set_ylim(*inset_limits)
 
-                    ax_main.set_title("(a) Full outlier-ratio range", loc="left", fontweight="bold", pad=6)
-                    ax_zoom.set_title(
-                        f"(b) Low outlier-ratio regime ({x_min_inset}%–{x_max_inset}%)",
-                        loc="left",
-                        fontweight="bold",
-                        pad=6,
-                    )
+                    if ax_zoom is not None:
+                        ax_main.set_title("(a) Full outlier-ratio range", loc="left", fontweight="bold", pad=6)
+                        ax_zoom.set_title(
+                            f"(b) Focus regime ({focus_xlim[0]:.0f}%–{focus_xlim[1]:.0f}%)",
+                            loc="left",
+                            fontweight="bold",
+                            pad=6,
+                        )
+                    else:
+                        ax_main.set_title("Outlier-ratio trend", loc="left", fontweight="bold", pad=6)
+                    fig.suptitle(metric, fontsize=13.5, y=0.975, fontweight="bold")
 
-                    summary_rows = []
-                    for method in plotted_methods:
-                        metric_pairs = _extract_metric_pairs(agg_df, metric, method=method)
-                        full_mean = mean_ignore_nan([pair[1] for pair in metric_pairs])
-                        inset_mean = mean_ignore_nan([pair[1] for pair in inset_series_by_method.get(method, [])])
-                        summary_rows.append((method, full_mean, inset_mean))
-
-                    summary_text = ["Mean values", "10%-90%    10%-40%"]
-                    for method, full_mean, inset_mean in summary_rows:
-                        full_text = f"{full_mean:.3f}" if not np.isnan(full_mean) else "nan"
-                        inset_text = f"{inset_mean:.3f}" if not np.isnan(inset_mean) else "nan"
-                        summary_text.append(f"{method:<12}{full_text:>7}    {inset_text:>7}")
-
-                    ax_main.text(
-                        1.01,
-                        0.98,
-                        "\n".join(summary_text),
-                        transform=ax_main.transAxes,
-                        va="top",
-                        ha="left",
-                        fontsize=8.3,
-                        family="monospace",
-                        bbox=dict(boxstyle="round,pad=0.35", facecolor="#fbfbfb", edgecolor="#d0d0d0", alpha=0.96),
-                    )
-
-                    legend_columns = 3 if len(method_handles) <= 6 else 4
-                    fig.legend(
+                    ax_side.set_axis_off()
+                    legend_columns = 1 if len(method_handles) <= 6 else 2
+                    ax_side.legend(
                         method_handles,
                         plotted_methods,
-                        loc="upper center",
-                        bbox_to_anchor=(0.5, 0.995),
-                        ncol=legend_columns,
+                        loc="upper left",
                         frameon=False,
-                        handlelength=2.2,
+                        title="Methods",
+                        title_fontsize=9.4,
+                        fontsize=8.2,
+                        ncol=legend_columns,
+                        handlelength=2.4,
                         columnspacing=1.2,
                     )
+                    _draw_summary_table(
+                        ax_side,
+                        headers=["Method", "Full Avg", "Focus Avg"],
+                        rows=_build_method_summary_rows(plotted_methods, agg_df, inset_series_by_method, metric),
+                        title="Summary",
+                        y_start=0.74 if ax_zoom is not None else 0.70,
+                        height=0.52 if ax_zoom is not None else 0.46,
+                    )
+                    if len(full_x_values) == 1:
+                        range_text = (
+                            f"Range\nObserved: {full_x_values[0]:.1f}% only\n"
+                            f"Focus ref: {focus_xlim[0]:.1f}% to {focus_xlim[1]:.1f}%"
+                        )
+                    else:
+                        range_text = (
+                            f"Range\nMain: {min(full_x_values):.1f}% to {max(full_x_values):.1f}%\n"
+                            f"Focus: {focus_xlim[0]:.1f}% to {focus_xlim[1]:.1f}%"
+                        )
+                    ax_side.text(
+                        0.02,
+                        0.16 if ax_zoom is not None else 0.13,
+                        range_text,
+                        transform=ax_side.transAxes,
+                        ha="left",
+                        va="top",
+                        fontsize=8.5,
+                        color="#4b5563",
+                        bbox=dict(boxstyle="round,pad=0.35", facecolor="#f7f9fc", edgecolor="#d7dde6"),
+                    )
 
-                    fig.subplots_adjust(left=0.10, right=0.77, top=0.86, bottom=0.10)
+                    fig.subplots_adjust(
+                        left=0.08,
+                        right=0.97,
+                        top=0.90,
+                        bottom=0.11 if ax_zoom is not None else 0.13,
+                    )
                     os.makedirs(comparison_dir, exist_ok=True)
                     trend_path_png = os.path.join(comparison_dir, f"outlier_vs_{_sanitize_metric_name(metric)}.png")
                     fig.savefig(trend_path_png, dpi=dpi, bbox_inches="tight")

@@ -1,0 +1,30 @@
+{
+  "preset": "structured35",
+  "pipeline_mode": "streaming",
+  "workers": 2,
+  "generation_workers": 2,
+  "simulator_profile": "landing",
+  "base_seed": 42,
+  "point_cloud_dir": "data/point_clouds_output_structured35_smoke",
+  "dem_dir": "data/dem_files_output_structured35_smoke",
+  "output_root": "results/debug/structured35_smoke",
+  "force_reprocess": true,
+  "force_regenerate": true,
+  "no_save_vector": true,
+  "dpi": 150,
+  "skip_generation": false,
+  "skip_ablation": true,
+  "skip_paper_report": true,
+  "ablation": "all",
+  "ratio_start": 0.1,
+  "ratio_stop": 0.13,
+  "ratio_step": 0.01,
+  "include_methods": [
+    "RANSAC",
+    "RobustLS-TLS",
+    "RSTLS"
+  ],
+  "disable_risk": true,
+  "disable_safety": true,
+  "disable_joint": true
+}
